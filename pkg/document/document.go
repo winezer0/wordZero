@@ -108,6 +108,8 @@ type ParagraphProperties struct {
 	Spacing             *Spacing             `xml:"w:spacing,omitempty"`
 	Indentation         *Indentation         `xml:"w:ind,omitempty"`
 	Justification       *Justification       `xml:"w:jc,omitempty"`
+	PageBreak           *PageBreak           `xml:"w:pageBreakBefore,omitempty"`
+	SectionProperties   *SectionProperties   `xml:"w:sectPr,omitempty"`
 }
 
 // ParagraphBorder 段落边框
@@ -150,6 +152,7 @@ type Run struct {
 	Drawing    *DrawingElement `xml:"w:drawing,omitempty"`
 	FieldChar  *FieldChar      `xml:"w:fldChar,omitempty"`
 	InstrText  *InstrText      `xml:"w:instrText,omitempty"`
+	Break      *Break          `xml:"w:br,omitempty"` // 换行
 }
 
 // RunProperties 文本属性
@@ -2559,4 +2562,64 @@ func (d *Document) parseTableRowProperties(decoder *xml.Decoder) (*TableRowPrope
 			}
 		}
 	}
+}
+
+// AddLineBreak 添加行间符
+func (p *Paragraph) AddLineBreak(text string) {
+	p.Runs = append(p.Runs, Run{
+		Break: &Break{},
+	})
+	if text != "" {
+		p.Runs = append(p.Runs, Run{
+			Text: Text{
+				Content: text,
+				Space:   "preserve",
+			},
+		})
+	}
+}
+
+func (p *Paragraph) AddPageBreak() {
+	if p.Properties == nil {
+		p.Properties = &ParagraphProperties{}
+	}
+	p.Properties.PageBreak = &PageBreak{}
+}
+
+// AddRun 追加自定义格式文本
+func (p *Paragraph) AddRun(text string, format *TextFormat, runProps *RunProperties) {
+	// 创建运行属性
+	if format != nil {
+		if format.FontFamily != "" {
+			runProps.FontFamily = &FontFamily{ASCII: format.FontFamily}
+		}
+
+		if format.Bold {
+			runProps.Bold = &Bold{}
+		}
+
+		if format.Italic {
+			runProps.Italic = &Italic{}
+		}
+
+		if format.FontColor != "" {
+			color := strings.TrimPrefix(format.FontColor, "#")
+			runProps.Color = &Color{Val: color}
+		}
+
+		if format.FontSize > 0 {
+			runProps.FontSize = &FontSize{Val: strconv.Itoa(format.FontSize * 2)}
+		}
+	}
+
+	run := Run{
+		Properties: runProps,
+		Text: Text{
+			Content: text,
+			Space:   "preserve",
+		},
+	}
+
+	p.Runs = append(p.Runs, run)
+	Debugf("向段落添加格式化文本: %s", text)
 }

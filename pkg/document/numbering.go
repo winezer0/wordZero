@@ -405,7 +405,7 @@ func (d *Document) updateNumberingFile() {
 // addNumberingRelationship 添加编号关系
 func (d *Document) addNumberingRelationship() {
 	// 生成关系ID
-	relationshipID := fmt.Sprintf("rId%d", len(d.documentRelationships.Relationships)+2) // +2 因为已有样式styles.xml定义
+	relationshipID := fmt.Sprintf("rId%d", len(d.relationships.Relationships)+1)
 
 	// 添加关系
 	relationship := Relationship{
@@ -413,7 +413,7 @@ func (d *Document) addNumberingRelationship() {
 		Type:   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
 		Target: "numbering.xml",
 	}
-	d.documentRelationships.Relationships = append(d.documentRelationships.Relationships, relationship)
+	d.relationships.Relationships = append(d.relationships.Relationships, relationship)
 }
 
 // RestartNumbering 重新开始编号
