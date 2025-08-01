@@ -155,6 +155,7 @@ func (tr *TemplateRenderer) AnalyzeTemplate(templateName string) (*TemplateAnaly
 
 // analyzeDocument 分析文档结构
 func (tr *TemplateRenderer) analyzeDocument(doc *Document, analysis *TemplateAnalysis) {
+	// 分析文档主体
 	for i, element := range doc.Body.Elements {
 		switch elem := element.(type) {
 		case *Paragraph:
@@ -164,6 +165,12 @@ func (tr *TemplateRenderer) analyzeDocument(doc *Document, analysis *TemplateAna
 			analysis.Tables = append(analysis.Tables, tableAnalysis)
 		}
 	}
+
+	// 分析页眉
+	tr.analyzeHeaders(doc, analysis)
+
+	// 分析页脚
+	tr.analyzeFooters(doc, analysis)
 }
 
 // analyzeParagraph 分析段落
@@ -308,4 +315,38 @@ func (analysis *TemplateAnalysis) GetRequiredData() *TemplateData {
 	}
 
 	return data
+}
+
+// analyzeHeaders 分析页眉中的模板变量
+func (tr *TemplateRenderer) analyzeHeaders(doc *Document, analysis *TemplateAnalysis) {
+	// 获取所有页眉
+	allHeaders := doc.GetAllHeaders()
+
+	tr.logInfo("分析页眉数量: %d", len(allHeaders))
+
+	for headerID, header := range allHeaders {
+		tr.logInfo("分析页眉: %s", headerID)
+
+		// 分析页眉中的每个段落
+		for _, para := range header.Paragraphs {
+			tr.analyzeParagraph(para, analysis)
+		}
+	}
+}
+
+// analyzeFooters 分析页脚中的模板变量
+func (tr *TemplateRenderer) analyzeFooters(doc *Document, analysis *TemplateAnalysis) {
+	// 获取所有页脚
+	allFooters := doc.GetAllFooters()
+
+	tr.logInfo("分析页脚数量: %d", len(allFooters))
+
+	for footerID, footer := range allFooters {
+		tr.logInfo("分析页脚: %s", footerID)
+
+		// 分析页脚中的每个段落
+		for _, para := range footer.Paragraphs {
+			tr.analyzeParagraph(para, analysis)
+		}
+	}
 }

@@ -226,6 +226,9 @@ func (d *Document) AddHeader(headerType HeaderFooterType, text string) error {
 	// 存储页眉内容
 	d.parts[headerPartName] = fullXML
 
+	// 存储页眉到内存映射中，供GetHeader方法使用
+	d.headers[headerID] = header
+
 	// 添加关系到文档关系
 	relationship := Relationship{
 		ID:     headerID,
@@ -278,6 +281,9 @@ func (d *Document) AddFooter(footerType HeaderFooterType, text string) error {
 
 	// 存储页脚内容
 	d.parts[footerPartName] = fullXML
+
+	// 存储页脚到内存映射中，供GetFooter方法使用
+	d.footers[footerID] = footer
 
 	// 添加关系到文档关系
 	relationship := Relationship{
@@ -358,6 +364,9 @@ func (d *Document) AddHeaderWithPageNumber(headerType HeaderFooterType, text str
 	// 存储页眉内容
 	d.parts[headerPartName] = fullXML
 
+	// 存储页眉到内存映射中，供GetHeader方法使用
+	d.headers[headerID] = header
+
 	// 添加关系到文档关系
 	relationship := Relationship{
 		ID:     headerID,
@@ -436,6 +445,9 @@ func (d *Document) AddFooterWithPageNumber(footerType HeaderFooterType, text str
 
 	// 存储页脚内容
 	d.parts[footerPartName] = fullXML
+
+	// 存储页脚到内存映射中，供GetFooter方法使用
+	d.footers[footerID] = footer
 
 	// 添加关系到文档关系
 	relationship := Relationship{
@@ -543,6 +555,197 @@ func (d *Document) addContentType(partName, contentType string) {
 	}
 	d.contentTypes.Overrides = append(d.contentTypes.Overrides, override)
 }
+
+
+// GetHeader 获取指定类型的页眉内容
+//
+// 参数 headerType 指定页眉类型，如HeaderFooterTypeDefault、HeaderFooterTypeFirst等
+// 返回页眉结构指针和是否找到的布尔值
+//
+// 示例:
+//
+//	doc, _ := document.Open("example.docx")
+//	header, exists := doc.GetHeader(document.HeaderFooterTypeDefault)
+//	if exists {
+//		for _, para := range header.Paragraphs {
+//			for _, run := range para.Runs {
+//				fmt.Print(run.Text.Content)
+//			}
+//		}
+//	}
+func (d *Document) GetHeader(headerType HeaderFooterType) (*Header, bool) {
+	// 首先查找节属性中的页眉引用
+	for _, element := range d.Body.Elements {
+		if sectPr, ok := element.(*SectionProperties); ok {
+			for _, headerRef := range sectPr.HeaderReferences {
+				if headerRef.Type == string(headerType) {
+					// 根据关系ID查找页眉
+					if header, exists := d.headers[headerRef.ID]; exists {
+						return header, true
+					}
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+
+
+// GetFooter 获取指定类型的页脚内容
+//
+// 参数 footerType 指定页脚类型，如HeaderFooterTypeDefault、HeaderFooterTypeFirst等
+// 返回页脚结构指针和是否找到的布尔值
+//
+// 示例:
+//
+//	doc, _ := document.Open("example.docx")
+//	footer, exists := doc.GetFooter(document.HeaderFooterTypeDefault)
+//	if exists {
+//		for _, para := range footer.Paragraphs {
+//			for _, run := range para.Runs {
+//				fmt.Print(run.Text.Content)
+//			}
+//		}
+//	}
+func (d *Document) GetFooter(footerType HeaderFooterType) (*Footer, bool) {
+	// 首先查找节属性中的页脚引用
+	for _, element := range d.Body.Elements {
+		if sectPr, ok := element.(*SectionProperties); ok {
+			for _, footerRef := range sectPr.FooterReferences {
+				if footerRef.Type == string(footerType) {
+					// 根据关系ID查找页脚
+					if footer, exists := d.footers[footerRef.ID]; exists {
+						return footer, true
+					}
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+
+// GetAllHeaders 获取所有页眉
+//
+// 返回包含所有页眉的映射，键为关系ID，值为页眉结构
+//
+// 示例:
+//
+//	doc, _ := document.Open("example.docx")
+//	headers := doc.GetAllHeaders()
+//	for relationID, header := range headers {
+//		fmt.Printf("页眉ID: %s, 段落数: %d\n", relationID, len(header.Paragraphs))
+//	}
+func (d *Document) GetAllHeaders() map[string]*Header {
+	result := make(map[string]*Header)
+	for id, header := range d.headers {
+		result[id] = header
+	}
+	return result
+}
+
+// GetAllFooters 获取所有页脚
+//
+// 返回包含所有页脚的映射，键为关系ID，值为页脚结构
+//
+// 示例:
+//
+//	doc, _ := document.Open("example.docx")
+//	footers := doc.GetAllFooters()
+//	for relationID, footer := range footers {
+//		fmt.Printf("页脚ID: %s, 段落数: %d\n", relationID, len(footer.Paragraphs))
+//	}
+func (d *Document) GetAllFooters() map[string]*Footer {
+	result := make(map[string]*Footer)
+	for id, footer := range d.footers {
+		result[id] = footer
+	}
+	return result
+}
+
+// ExtractHeaderText 提取页眉的纯文本内容
+//
+// 参数 headerType 指定页眉类型
+// 返回页眉的纯文本内容和是否找到的布尔值
+//
+// 示例:
+//
+//	doc, _ := document.Open("example.docx")
+//	text, exists := doc.ExtractHeaderText(document.HeaderFooterTypeDefault)
+//	if exists {
+//		fmt.Printf("页眉内容: %s\n", text)
+//	}
+func (d *Document) ExtractHeaderText(headerType HeaderFooterType) (string, bool) {
+	header, exists := d.GetHeader(headerType)
+	if !exists {
+		return "", false
+	}
+
+	var result strings.Builder
+	for _, para := range header.Paragraphs {
+		for _, run := range para.Runs {
+			// 处理普通文本
+			if run.Text.Content != "" {
+				result.WriteString(run.Text.Content)
+			}
+			// 处理域字段文本（如页码显示值）
+			if run.FieldChar != nil && run.FieldChar.FieldCharType == "separate" {
+				// 这是域字段的分隔符，后面的文本是域的显示值
+				continue
+			}
+			if run.InstrText != nil {
+				// 这是域指令，可以提取域的类型和参数
+				result.WriteString(fmt.Sprintf("[域指令: %s]", run.InstrText.Content))
+			}
+		}
+		result.WriteString("\n") // 段落间换行
+	}
+
+	return strings.TrimSpace(result.String()), true
+}
+
+// ExtractFooterText 提取页脚的纯文本内容
+//
+// 参数 footerType 指定页脚类型
+// 返回页脚的纯文本内容和是否找到的布尔值
+//
+// 示例:
+//
+//	doc, _ := document.Open("example.docx")
+//	text, exists := doc.ExtractFooterText(document.HeaderFooterTypeDefault)
+//	if exists {
+//		fmt.Printf("页脚内容: %s\n", text)
+//	}
+func (d *Document) ExtractFooterText(footerType HeaderFooterType) (string, bool) {
+	footer, exists := d.GetFooter(footerType)
+	if !exists {
+		return "", false
+	}
+
+	var result strings.Builder
+	for _, para := range footer.Paragraphs {
+		for _, run := range para.Runs {
+			// 处理普通文本
+			if run.Text.Content != "" {
+				result.WriteString(run.Text.Content)
+			}
+			// 处理域字段文本（如页码显示值）
+			if run.FieldChar != nil && run.FieldChar.FieldCharType == "separate" {
+				// 这是域字段的分隔符，后面的文本是域的显示值
+				continue
+			}
+			if run.InstrText != nil {
+				// 这是域指令，可以提取域的类型和参数
+				result.WriteString(fmt.Sprintf("[域指令: %s]", run.InstrText.Content))
+			}
+		}
+		result.WriteString("\n") // 段落间换行
+	}
+
+	return strings.TrimSpace(result.String()), true
+}
+
 
 // AddStyleHeader 添加带有样式的页眉
 func (d *Document) AddStyleHeader(headerType HeaderFooterType, text, redText string, format *TextFormat) error {

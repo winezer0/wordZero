@@ -840,7 +840,7 @@ WordZero现在支持将Markdown文档转换为Word格式，基于goldmark解析�
 
 #### 基础字符串转换
 ```go
-import "github.com/ZeroHawkeye/wordZero/pkg/markdown"
+import "github.com/winezer0/wordZero/pkg/markdown"
 
 // 创建转换器
 converter := markdown.NewConverter(markdown.DefaultOptions())
@@ -1031,7 +1031,7 @@ WordZero现在支持将Word文档反向转换为Markdown格式，提供完整的
 
 #### 基础文件导出
 ```go
-import "github.com/ZeroHawkeye/wordZero/pkg/markdown"
+import "github.com/winezer0/wordZero/pkg/markdown"
 
 // 创建导出器
 exporter := markdown.NewExporter(markdown.DefaultExportOptions())
@@ -1112,7 +1112,7 @@ err := exporter.BatchExport(files, "markdown_output/", options)
 
 #### 自动转换
 ```go
-import "github.com/ZeroHawkeye/wordZero/pkg/markdown"
+import "github.com/winezer0/wordZero/pkg/markdown"
 
 // 创建双向转换器
 converter := markdown.NewBidirectionalConverter(

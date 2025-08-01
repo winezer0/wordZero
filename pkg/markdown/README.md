@@ -25,7 +25,7 @@ package main
 
 import (
     "fmt"
-    "github.com/ZeroHawkeye/wordZero/pkg/markdown"
+    "github.com/winezer0/wordZero/pkg/markdown"
 )
 
 func main() {
@@ -50,7 +50,7 @@ package main
 
 import (
     "fmt"
-    "github.com/ZeroHawkeye/wordZero/pkg/markdown"
+    "github.com/winezer0/wordZero/pkg/markdown"
 )
 
 func main() {
@@ -75,7 +75,7 @@ package main
 
 import (
     "fmt"
-    "github.com/ZeroHawkeye/wordZero/pkg/markdown"
+    "github.com/winezer0/wordZero/pkg/markdown"
 )
 
 func main() {

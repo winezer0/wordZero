@@ -31,6 +31,10 @@ type Document struct {
 	parts map[string][]byte
 	// 图片ID计数器，确保每个图片都有唯一的ID
 	nextImageID int
+	// 页眉集合，键为关系ID
+	headers map[string]*Header
+	// 页脚集合，键为关系ID
+	footers map[string]*Footer
 }
 
 // Body 表示文档主体
@@ -371,6 +375,8 @@ func New() *Document {
 			Xmlns:         "http://schemas.openxmlformats.org/package/2006/relationships",
 			Relationships: []Relationship{},
 		},
+		headers: make(map[string]*Header),
+		footers: make(map[string]*Footer),
 	}
 
 	// 初始化文档结构
@@ -418,6 +424,8 @@ func Open(filename string) (*Document, error) {
 			Relationships: []Relationship{},
 		},
 		nextImageID: 1, // 初始化图片ID计数器
+		headers:     make(map[string]*Header),
+		footers:     make(map[string]*Footer),
 	}
 
 	// 读取所有文件部件
@@ -453,6 +461,16 @@ func Open(filename string) (*Document, error) {
 		Debugf("解析样式失败，使用默认样式: %v", err)
 		// 如果样式解析失败，重新初始化为默认样式
 		doc.styleManager = style.NewStyleManager()
+	}
+
+	// 解析文档关系，获取页眉页脚引用
+	if err := doc.parseDocumentRelationships(); err != nil {
+		Debugf("解析文档关系失败: %v", err)
+	}
+
+	// 解析页眉页脚内容
+	if err := doc.parseHeadersFooters(); err != nil {
+		Debugf("解析页眉页脚失败: %v", err)
 	}
 
 	Infof("成功打开文档: %s", filename)
@@ -1479,6 +1497,28 @@ func (d *Document) parseRun(decoder *xml.Decoder, startElement xml.StartElement)
 					return nil, err
 				}
 				run.Text.Content = content
+			case "fldChar":
+				// 解析域字符
+				fieldCharType := getAttributeValue(t.Attr, "fldCharType")
+				if fieldCharType != "" {
+					run.FieldChar = &FieldChar{
+						FieldCharType: fieldCharType,
+					}
+				}
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return nil, err
+				}
+			case "instrText":
+				// 解析域指令文本
+				space := getAttributeValue(t.Attr, "space")
+				content, err := d.readElementText(decoder, "instrText")
+				if err != nil {
+					return nil, err
+				}
+				run.InstrText = &InstrText{
+					Space:   space,
+					Content: content,
+				}
 			default:
 				if err := d.skipElement(decoder, t.Name.Local); err != nil {
 					return nil, err
@@ -1944,6 +1984,57 @@ func (d *Document) parseSectionProperties(decoder *xml.Decoder, startElement xml
 				if err := d.skipElement(decoder, t.Name.Local); err != nil {
 					return nil, err
 				}
+			case "headerReference":
+				// 解析页眉引用
+				headerType := getAttributeValue(t.Attr, "type")
+				// 在OpenXML中，关系ID使用r:id属性
+				headerID := getAttributeValueWithNamespace(t.Attr, "id", "r")
+				if headerID == "" {
+					headerID = getAttributeValue(t.Attr, "id") // 备用方案
+				}
+				if headerType != "" && headerID != "" {
+					headerRef := &HeaderFooterReference{
+						Type: headerType,
+						ID:   headerID,
+					}
+					sectPr.HeaderReferences = append(sectPr.HeaderReferences, headerRef)
+				}
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return nil, err
+				}
+			case "footerReference":
+				// 解析页脚引用
+				footerType := getAttributeValue(t.Attr, "type")
+				// 在OpenXML中，关系ID使用r:id属性
+				footerID := getAttributeValueWithNamespace(t.Attr, "id", "r")
+				if footerID == "" {
+					footerID = getAttributeValue(t.Attr, "id") // 备用方案
+				}
+				if footerType != "" && footerID != "" {
+					footerRef := &FooterReference{
+						Type: footerType,
+						ID:   footerID,
+					}
+					sectPr.FooterReferences = append(sectPr.FooterReferences, footerRef)
+				}
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return nil, err
+				}
+			case "titlePg":
+				// 解析首页不同设置
+				sectPr.TitlePage = &TitlePage{}
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return nil, err
+				}
+			case "pgNumType":
+				// 解析页码类型
+				fmt := getAttributeValue(t.Attr, "fmt")
+				if fmt != "" {
+					sectPr.PageNumType = &PageNumType{Fmt: fmt}
+				}
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return nil, err
+				}
 			default:
 				// 跳过其他节属性
 				if err := d.skipElement(decoder, t.Name.Local); err != nil {
@@ -2001,6 +2092,16 @@ func (d *Document) readElementText(decoder *xml.Decoder, elementName string) (st
 func getAttributeValue(attrs []xml.Attr, name string) string {
 	for _, attr := range attrs {
 		if attr.Name.Local == name {
+			return attr.Value
+		}
+	}
+	return ""
+}
+
+// getAttributeValueWithNamespace 获取带命名空间的属性值
+func getAttributeValueWithNamespace(attrs []xml.Attr, localName, namespace string) string {
+	for _, attr := range attrs {
+		if attr.Name.Local == localName && attr.Name.Space == namespace {
 			return attr.Value
 		}
 	}
@@ -2563,6 +2664,249 @@ func (d *Document) parseTableRowProperties(decoder *xml.Decoder) (*TableRowPrope
 		}
 	}
 }
+
+
+// parseDocumentRelationships 解析文档关系
+func (d *Document) parseDocumentRelationships() error {
+	Debugf("开始解析文档关系")
+
+	// 查找文档关系文件
+	relData, ok := d.parts["word/_rels/document.xml.rels"]
+	if !ok {
+		Debugf("文档关系文件不存在")
+		return nil // 不是错误，有些文档可能没有页眉页脚
+	}
+
+	// 解析关系XML
+	var rels Relationships
+	if err := xml.Unmarshal(relData, &rels); err != nil {
+		return WrapError("parse_document_relationships", err)
+	}
+
+	// 合并到文档的documentRelationships中（保留已有的关系）
+	if d.documentRelationships == nil {
+		d.documentRelationships = &Relationships{
+			Xmlns:         "http://schemas.openxmlformats.org/package/2006/relationships",
+			Relationships: []Relationship{},
+		}
+	}
+
+	// 合并新解析的关系
+	d.documentRelationships.Relationships = append(d.documentRelationships.Relationships, rels.Relationships...)
+
+	Debugf("解析文档关系完成，共 %d 个关系", len(rels.Relationships))
+	return nil
+}
+
+// parseHeadersFooters 解析页眉页脚内容
+func (d *Document) parseHeadersFooters() error {
+	Debugf("开始解析页眉页脚内容")
+
+	if d.documentRelationships == nil {
+		Debugf("文档关系为空，跳过页眉页脚解析")
+		return nil
+	}
+
+	// 遍历所有关系，查找页眉页脚
+	for _, rel := range d.documentRelationships.Relationships {
+		switch rel.Type {
+		case "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header":
+			// 解析页眉
+			if err := d.parseHeaderFile(rel.ID, rel.Target); err != nil {
+				Debugf("解析页眉文件失败: %s, %v", rel.Target, err)
+			}
+		case "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer":
+			// 解析页脚
+			if err := d.parseFooterFile(rel.ID, rel.Target); err != nil {
+				Debugf("解析页脚文件失败: %s, %v", rel.Target, err)
+			}
+		}
+	}
+
+	Debugf("页眉页脚解析完成，页眉: %d 个，页脚: %d 个", len(d.headers), len(d.footers))
+	return nil
+}
+
+// parseHeaderFile 解析单个页眉文件
+func (d *Document) parseHeaderFile(relationID, target string) error {
+	// 构建完整的文件路径
+	headerPath := fmt.Sprintf("word/%s", target)
+	headerData, ok := d.parts[headerPath]
+	if !ok {
+		return fmt.Errorf("页眉文件不存在: %s", headerPath)
+	}
+
+	// 解析页眉XML
+	var header Header
+	if err := xml.Unmarshal(headerData, &header); err != nil {
+		// 尝试手动解析XML（处理命名空间问题）
+		if err := d.parseHeaderXMLManually(headerData, &header); err != nil {
+			return WrapError("parse_header_file", err)
+		}
+	}
+
+	// 存储页眉
+	d.headers[relationID] = &header
+	Debugf("成功解析页眉: %s, 段落数: %d", relationID, len(header.Paragraphs))
+
+	return nil
+}
+
+// parseFooterFile 解析单个页脚文件
+func (d *Document) parseFooterFile(relationID, target string) error {
+	// 构建完整的文件路径
+	footerPath := fmt.Sprintf("word/%s", target)
+	footerData, ok := d.parts[footerPath]
+	if !ok {
+		return fmt.Errorf("页脚文件不存在: %s", footerPath)
+	}
+
+	// 解析页脚XML
+	var footer Footer
+	if err := xml.Unmarshal(footerData, &footer); err != nil {
+		// 尝试手动解析XML
+		if err := d.parseFooterXMLManually(footerData, &footer); err != nil {
+			return WrapError("parse_footer_file", err)
+		}
+	}
+
+	// 存储页脚
+	d.footers[relationID] = &footer
+	Debugf("成功解析页脚: %s, 段落数: %d", relationID, len(footer.Paragraphs))
+
+	return nil
+}
+
+// parseHeaderXMLManually 手动解析页眉XML，处理命名空间问题
+func (d *Document) parseHeaderXMLManually(xmlData []byte, header *Header) error {
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			// 检查是否是页眉根元素
+			if t.Name.Local == "hdr" {
+				// 解析页眉内容
+				if err := d.parseHeaderContent(decoder, header); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("未找到页眉根元素")
+}
+
+// parseHeaderContent 解析页眉内容
+func (d *Document) parseHeaderContent(decoder *xml.Decoder, header *Header) error {
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "p" {
+				// 解析段落
+				paragraph, err := d.parseParagraph(decoder, t)
+				if err != nil {
+					return err
+				}
+				header.Paragraphs = append(header.Paragraphs, paragraph)
+			} else {
+				// 跳过其他元素
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return err
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "hdr" {
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
+// parseFooterXMLManually 手动解析页脚XML，处理命名空间问题
+func (d *Document) parseFooterXMLManually(xmlData []byte, footer *Footer) error {
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			// 检查是否是页脚根元素
+			if t.Name.Local == "ftr" {
+				// 解析页脚内容
+				if err := d.parseFooterContent(decoder, footer); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("未找到页脚根元素")
+}
+
+// parseFooterContent 解析页脚内容
+func (d *Document) parseFooterContent(decoder *xml.Decoder, footer *Footer) error {
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "p" {
+				// 解析段落
+				paragraph, err := d.parseParagraph(decoder, t)
+				if err != nil {
+					return err
+				}
+				footer.Paragraphs = append(footer.Paragraphs, paragraph)
+			} else {
+				// 跳过其他元素
+				if err := d.skipElement(decoder, t.Name.Local); err != nil {
+					return err
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "ftr" {
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
 
 // AddLineBreak 添加行间符
 func (p *Paragraph) AddLineBreak(text string) {
